@@ -45,14 +45,14 @@ export function Keyboard({
         const map: GenericRange[][] = [];
         for (let midiNote = 0; midiNote < 128; midiNote++) {
             // find all splits tha this key belongs to
-            map.push(
-                splits.reduce((matched: GenericRange[], split) => {
-                    if (split.min <= midiNote && split.max >= midiNote) {
-                        matched.push(split);
-                    }
-                    return matched;
-                }, [])
-            );
+            const matched: GenericRange[] = [];
+
+            for (const split of splits) {
+                if (split.min <= midiNote && split.max >= midiNote) {
+                    matched.push(split);
+                }
+            }
+            map.push(matched);
         }
         return map;
     }, [splits]);
@@ -81,29 +81,25 @@ export function Keyboard({
             // processor callback will trigger the note release
             engine.processor.noteOff(KEYBOARD_TARGET_CHANNEL, note);
             // find all splits tha this key belongs to
-            matchingSplits[note].forEach((split) => {
+            for (const split of matchingSplits[note]) {
                 for (let i = split.min; i <= split.max; i++) {
                     keysRef?.current?.[i]?.classList?.remove("zone_highlight");
                 }
-            });
+            }
         };
 
         const userNoteOn = (note: number, velocity: number) => {
             engine.processor.noteOn(KEYBOARD_TARGET_CHANNEL, note, velocity);
 
-            matchingSplits[note].forEach((split) => {
+            for (const split of matchingSplits[note]) {
                 for (let i = split.min; i <= split.max; i++) {
                     keysRef?.current?.[i]?.classList?.add("zone_highlight");
                 }
-            });
+            }
         };
 
         const moveHandler = (e: MouseEvent) => {
             const mouseEvent = e;
-
-            if (!mouseHeld) {
-                return;
-            }
 
             const newPressedKeys = new Set<number>();
 
@@ -117,7 +113,11 @@ export function Keyboard({
             const rect = target.getBoundingClientRect();
 
             const midiNote = keysRef?.current?.indexOf(target) || 0;
-            if (isNaN(midiNote) || midiNote < 0 || pressedKeys.has(midiNote)) {
+            if (
+                Number.isNaN(midiNote) ||
+                midiNote < 0 ||
+                pressedKeys.has(midiNote)
+            ) {
                 return;
             }
 
@@ -140,14 +140,19 @@ export function Keyboard({
                     .padStart(3, " ");
             }
 
+            // Do the latter only for pressed
+            if (!mouseHeld) {
+                return;
+            }
+
             newPressedKeys.add(midiNote);
 
             // only release keys that are no longer being pressed
-            pressedKeys.forEach((note) => {
+            for (const note of pressedKeys) {
                 if (!newPressedKeys.has(note)) {
                     userNoteOff(note);
                 }
-            });
+            }
 
             if (!pressedKeys.has(midiNote)) {
                 userNoteOn(midiNote, velocity);
@@ -162,17 +167,15 @@ export function Keyboard({
 
         const onMouseUp = () => {
             mouseHeld = false;
-            pressedKeys.forEach((note) => userNoteOff(note));
+            for (const note of pressedKeys) userNoteOff(note);
         };
 
         const onMouseLeave = () => {
-            pressedKeys.forEach((note) => userNoteOff(note));
+            for (const note of pressedKeys) userNoteOff(note);
         };
 
         const onMouseMove = (e: MouseEvent) => {
-            if (mouseHeld) {
-                moveHandler(e);
-            }
+            moveHandler(e);
         };
 
         const kb = keyboardRef.current;
@@ -198,15 +201,15 @@ export function Keyboard({
 
     const enabledKeys: boolean[] = useMemo((): boolean[] => {
         if (splits.length === 0) {
-            return Array(128).fill(true) as boolean[];
+            return new Array(128).fill(true) as boolean[];
         }
-        const e: boolean[] = Array(128).fill(false) as boolean[];
+        const e: boolean[] = new Array(128).fill(false) as boolean[];
 
-        splits.forEach((s) => {
+        for (const s of splits) {
             for (let i = s.min; i <= s.max; i++) {
                 e[i] ||= true;
             }
-        });
+        }
         return e;
     }, [splits]);
 

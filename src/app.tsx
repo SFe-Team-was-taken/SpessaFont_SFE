@@ -32,6 +32,7 @@ import type { BasicSoundBank, GenericRange } from "spessasynth_core";
 import toast, { Toaster } from "react-hot-toast";
 import "./toasts.css";
 import { Welcome } from "./welcome/welcome.tsx";
+import { readSampleRateParam } from "./utils/sample_rate_param.ts"; // apply locale
 
 // apply locale
 const initialSettings = loadSettings();
@@ -47,7 +48,7 @@ void i18next.use(initReactI18next).init({
 });
 
 const context = new AudioContext({
-    sampleRate: 48000,
+    sampleRate: readSampleRateParam(),
     latencyHint: "interactive"
 });
 
@@ -58,6 +59,23 @@ applyAudioSettings(initialSettings, audioEngine);
 
 // shared clipboard
 const clipboardManager = new ClipboardManager();
+
+interface LaunchParams {
+    files: readonly FileSystemFileHandle[];
+}
+
+interface LaunchQueue {
+    setConsumer(consumer: (params: LaunchParams) => void): void;
+}
+
+interface GlobalThisLaunch {
+    launchQueue?: LaunchQueue;
+}
+
+if (navigator.serviceWorker) {
+    await navigator.serviceWorker.register("service-worker.js");
+    console.info("Registered service worker");
+}
 
 function App() {
     const { t } = useTranslation();
@@ -114,7 +132,7 @@ function App() {
             let bank: BasicSoundBank | undefined = undefined;
             if (bankFile instanceof File) {
                 // @ts-expect-error chrome property
-                if (bankFile.size > 2_147_483_648 && window.chrome) {
+                if (bankFile.size > 2_147_483_648 && globalThis.chrome) {
                     // this not anti-chrome code,
                     // loading 4GB sound banks throws NotReadable error,
                     // uncomment this code and try it for yourself
@@ -129,11 +147,11 @@ function App() {
                     });
                     await new Promise((r) => setTimeout(r, 100));
                     bank = loadSoundBank(buffer);
-                } catch (e) {
-                    console.error(e);
+                } catch (error) {
+                    console.error(error);
                     toast.dismiss(id);
                     // make so the error appears at the bottom
-                    toast.error(`${e as string}`);
+                    toast.error(`${error as string}`);
                     toast.error(t("loadingAndSaving.errorLoadingSoundBank"));
                     return;
                 }
@@ -152,6 +170,19 @@ function App() {
         },
         [t]
     );
+
+    useEffect(() => {
+        if ("launchQueue" in globalThis) {
+            const launch = (globalThis as GlobalThisLaunch).launchQueue!;
+            launch.setConsumer(async (launchParams) => {
+                await audioEngine.context.resume();
+                for (const fileHandle of launchParams.files) {
+                    const file = await fileHandle.getFile();
+                    await openNewBankTab(file);
+                }
+            });
+        }
+    }, [openNewBankTab]);
 
     const openFile = useCallback(() => {
         const input = document.createElement("input");
@@ -226,7 +257,7 @@ function App() {
     );
 
     const showTabList = !settings;
-    const showWelcome = tabs.length < 1 && !settings;
+    const showWelcome = tabs.length === 0 && !settings;
     const showSettings = settings;
     const showEditor = !showWelcome && !showSettings && !!currentManager;
 

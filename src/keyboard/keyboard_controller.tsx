@@ -57,38 +57,41 @@ export function KeyboardController({
 
     useEffect(() => {
         engine.processor.onEventCall = (e) => {
-            if (
-                e.data &&
-                "channel" in e.data &&
-                e.data?.channel === KEYBOARD_TARGET_CHANNEL
-            ) {
+            if (e.data && "channel" in e.data) {
                 switch (e.type) {
                     case "controllerChange": {
+                        if (e.data?.channel !== KEYBOARD_TARGET_CHANNEL) return;
                         const ccV = e.data.controllerValue;
                         const cc = e.data.controllerNumber;
-                        knobRefs.current.forEach((r) => {
+                        for (const r of knobRefs.current) {
                             r?.current?.ccUpdate(cc, ccV);
-                        });
+                        }
                         break;
                     }
 
-                    case "stopAll":
+                    case "stopAll": {
                         keyboardRef?.current?.clearAll();
                         break;
+                    }
 
-                    case "noteOn":
+                    case "noteOn": {
                         keyboardRef?.current?.pressNote(e.data.midiNote);
                         break;
+                    }
 
-                    case "noteOff":
+                    case "noteOff": {
                         keyboardRef?.current?.releaseNote(e.data.midiNote);
                         break;
+                    }
 
-                    case "pitchWheel":
+                    case "pitchWheel": {
+                        if (e.data?.channel !== KEYBOARD_TARGET_CHANNEL) return;
                         pitchRef?.current?.setPitch(e.data.pitch);
                         break;
+                    }
 
                     case "channelPressure": {
+                        if (e.data?.channel !== KEYBOARD_TARGET_CHANNEL) return;
                         pitchRef?.current?.setPressure(e.data.pressure);
                     }
                 }
