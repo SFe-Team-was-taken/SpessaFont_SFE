@@ -1,8 +1,13 @@
 .keyboard_controller {
+    min-height: max-content;
+    overflow: clip;
+}
+
+.keyboard_controller_scroll {
     display: flex;
     flex-direction: column;
     align-items: center;
-    overflow: clip;
+    overflow-x: auto;
 }
 
 .keyboard_controller * {
@@ -10,7 +15,6 @@
 }
 
 .controller_row_scroll {
-    overflow-x: auto;
     align-self: stretch;
     display: flex;
     align-items: center;

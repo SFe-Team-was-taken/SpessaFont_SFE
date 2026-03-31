@@ -23,8 +23,7 @@ export const localePolish = {
         main: "Witamy w SpessaFont, internetowym edytorze SoundFont2/DLS!",
         openPrompt: "Otwórz plik, aby rozpocząć",
         newPrompt: "Lub zacznij z pustym plikiem...",
-        copyright:
-            "Stworzone przez Spessasus używając spessasynth_core i spessasynth_lib.",
+        copyright: "Stworzone przez Spessasus używając spessasynth_core.",
         copyrightTwo: `Copyright © Spessasus ${new Date().getFullYear()}, Na licencji Apache-2.0.`
     },
     poweredBy: "Napędzane przez",
@@ -53,6 +52,7 @@ export const localePolish = {
     no: "Nie",
     none: "Brak",
     githubPage: "Strona projektu",
+    discord: "Dołącz do serwera Discord!",
     keyboard: "Klawiatura",
 
     addNew: "Dodaj nowy",

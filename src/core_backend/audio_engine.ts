@@ -1,6 +1,7 @@
 import {
     type BasicMIDI,
     BasicSoundBank,
+    midiMessageTypes,
     SoundBankLoader,
     SpessaSynthLogging,
     SpessaSynthProcessor,
@@ -11,6 +12,7 @@ import { logInfo } from "../utils/core_utils.ts";
 // audio worklet processor operates at that
 const BLOCK_SIZE = 128;
 const MAX_CHUNKS_QUEUED = 16; // 16 * 128 = 2,048 // Windows does not like small buffer sizes
+const MAX_RENDERED_AT_ONCE = 4;
 
 const dummy = BasicSoundBank.getSampleSoundBankFile();
 
@@ -29,6 +31,10 @@ export class AudioEngine {
     readonly maxChunksQueued;
 
     private worklet: AudioWorkletNode | undefined;
+    private processorTime = {
+        taken: 0,
+        time: 0
+    };
 
     constructor(context: AudioContext) {
         this.context = context;
@@ -68,6 +74,39 @@ export class AudioEngine {
         return this.sequencer.paused;
     }
 
+    private get synthTime() {
+        return (
+            this.processorTime.time +
+            (performance.now() - this.processorTime.taken) / 1000
+        );
+    }
+
+    public processRealTime(msg: number[] | Uint8Array) {
+        this.processor.processMessage(msg, 0, {
+            time: this.synthTime
+        });
+    }
+
+    public ccChangeRealTime(ch: number, cc: number, value: number) {
+        this.processRealTime([
+            midiMessageTypes.controllerChange | (ch % 16),
+            cc,
+            value
+        ]);
+    }
+
+    public noteOffRealTime(ch: number, note: number) {
+        this.processRealTime([midiMessageTypes.noteOff | (ch % 16), note]);
+    }
+
+    public noteOnRealTime(ch: number, note: number, velocity: number) {
+        this.processRealTime([
+            midiMessageTypes.noteOn | (ch % 16),
+            note,
+            velocity
+        ]);
+    }
+
     async resumeContext() {
         await this.context.resume();
         clearInterval(this.intervalID);
@@ -94,7 +133,10 @@ export class AudioEngine {
         if (this.audioChunksQueued >= this.maxChunksQueued) {
             return;
         }
-        const toRender = this.maxChunksQueued - this.audioChunksQueued;
+        const toRender = Math.min(
+            MAX_RENDERED_AT_ONCE,
+            this.maxChunksQueued - this.audioChunksQueued
+        );
         const data: Float32Array[] = [];
         const transferList: ArrayBuffer[] = [];
 
@@ -122,6 +164,8 @@ export class AudioEngine {
             data.push(dataChunk);
             transferList.push(dataChunk.buffer);
         }
+        this.processorTime.taken = performance.now();
+        this.processorTime.time = this.processor.currentSynthTime;
 
         // send to worklet
         if (this.worklet) {
