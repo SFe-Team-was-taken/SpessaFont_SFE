@@ -1,12 +1,13 @@
-import type { AudioEngine } from "../core_backend/audio_engine.ts";
 import "./keyboard_controller.css";
 import { Keyboard, type KeyboardRef } from "./keyboard/keyboard.tsx";
 import * as React from "react";
 import { type JSX, type RefObject, useEffect, useRef, useState } from "react";
 import {
+    CONTROLLER_TABLE_SIZE,
+    DEFAULT_MIDI_CONTROLLERS,
     type GenericRange,
     type MIDIController,
-    midiControllers
+    MIDIControllers
 } from "spessasynth_core";
 import {
     Controller,
@@ -18,30 +19,32 @@ import {
     OtherControllers
 } from "./controller/other_controllers.tsx";
 import { useTranslation } from "react-i18next";
+import { useAudioEngine } from "../core_backend/audio_engine_context.ts";
 
 const INITIAL_CC_LIST: MIDIController[] = [
-    midiControllers.modulationWheel,
-    midiControllers.mainVolume,
-    midiControllers.pan,
-    midiControllers.expressionController,
-    midiControllers.sustainPedal,
-    midiControllers.filterResonance,
-    midiControllers.brightness,
+    MIDIControllers.modulationWheel,
+    MIDIControllers.mainVolume,
+    MIDIControllers.pan,
+    MIDIControllers.expression,
+    MIDIControllers.sustainPedal,
+    MIDIControllers.filterResonance,
+    MIDIControllers.brightness,
 
-    midiControllers.reverbDepth,
-    midiControllers.chorusDepth
+    MIDIControllers.reverbDepth,
+    MIDIControllers.chorusDepth
 ];
 
 export function KeyboardController({
-    engine,
     ccOptions,
     splits
 }: {
-    engine: AudioEngine;
     ccOptions: JSX.Element;
     splits: GenericRange[];
 }) {
     const { t } = useTranslation();
+    const {
+        audioEngine: { processor }
+    } = useAudioEngine();
     const [controllers, setControllers] =
         useState<MIDIController[]>(INITIAL_CC_LIST);
     const knobRefs = useRef<RefObject<ControllerKnobRef | null>[]>([]);
@@ -56,15 +59,27 @@ export function KeyboardController({
     const keyboardRef = useRef<KeyboardRef>(null);
 
     useEffect(() => {
-        engine.processor.onEventCall = (e) => {
-            if (e.data && "channel" in e.data) {
+        processor.onEventCall = (e) => {
+            if (e.data) {
                 switch (e.type) {
                     case "controllerChange": {
                         if (e.data?.channel !== KEYBOARD_TARGET_CHANNEL) return;
-                        const ccV = e.data.controllerValue;
-                        const cc = e.data.controllerNumber;
+                        const ccV = e.data.value;
+                        const cc = e.data.controller;
                         for (const r of knobRefs.current) {
                             r?.current?.ccUpdate(cc, ccV);
+                        }
+                        break;
+                    }
+
+                    case "reset": {
+                        for (let i = 0; i < CONTROLLER_TABLE_SIZE; i++) {
+                            for (const r of knobRefs.current) {
+                                r?.current?.ccUpdate(
+                                    i,
+                                    DEFAULT_MIDI_CONTROLLERS[i] >> 7
+                                );
+                            }
                         }
                         break;
                     }
@@ -84,37 +99,37 @@ export function KeyboardController({
                         break;
                     }
 
-                    case "pitchWheel": {
-                        if (e.data?.channel !== KEYBOARD_TARGET_CHANNEL) return;
-                        pitchRef?.current?.setPitch(e.data.pitch);
-                        break;
-                    }
+                    case "channelParamChange": {
+                        if (e.data.channel !== KEYBOARD_TARGET_CHANNEL) return;
+                        switch (e.data.parameter) {
+                            case "pressure": {
+                                pitchRef?.current?.setPressure(e.data.value);
+                                break;
+                            }
 
-                    case "channelPressure": {
-                        if (e.data?.channel !== KEYBOARD_TARGET_CHANNEL) return;
-                        pitchRef?.current?.setPressure(e.data.pressure);
+                            case "pitchWheel": {
+                                pitchRef?.current?.setPitch(e.data.value);
+                            }
+                        }
+                        break;
                     }
                 }
             }
         };
-    }, [controllers, engine.processor, keyboardRef]);
+    }, [controllers, processor, keyboardRef]);
 
     return (
         <div className={"keyboard_controller"}>
             <div className={"keyboard_controller_scroll"}>
                 <Keyboard
                     ref={keyboardRef}
-                    engine={engine}
                     keyDisplay={keyDisplayRef}
                     velocityDisplay={velocityDisplayRef}
                     splits={splits}
                 ></Keyboard>
                 <div className={"controller_row_scroll"}>
                     <div className={"controller_row controller_row_main"}>
-                        <OtherControllers
-                            engine={engine}
-                            ref={pitchRef}
-                        ></OtherControllers>
+                        <OtherControllers ref={pitchRef}></OtherControllers>
 
                         <div className={"controller_row"}>
                             {controllers.map((cc, i) => {
@@ -127,7 +142,6 @@ export function KeyboardController({
                                     <Controller
                                         ccOptions={ccOptions}
                                         cc={cc}
-                                        engine={engine}
                                         setCC={setCC}
                                         key={i}
                                         ref={knobRefs.current[i]}

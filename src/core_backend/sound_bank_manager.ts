@@ -16,15 +16,20 @@ import {
     ZONE_SORTING_FUNCTION
 } from "../utils/reorder_zones.ts";
 import { presetSorter } from "../utils/preset_sorter.ts";
+import { SOFTWARE_NAME } from "../utils/software_name.ts";
 
 export type BankEditView = "info" | BasicInstrument | BasicSample | BasicPreset;
 
-const dummy = await BasicSoundBank.getSampleSoundBankFile();
+export type SaveFormat = "auto" | "sf2" | "dls" | "sf3";
+
+const dummy = BasicSoundBank.getSampleSoundBankFile();
 
 export default class SoundBankManager extends BasicSoundBank {
     processor: SpessaSynthProcessor;
     sequencer: SpessaSynthSequencer;
     history = new HistoryManager();
+    writeType: SaveFormat = "auto";
+    saveHandle?: FileSystemFileHandle;
 
     currentView: BankEditView = "info";
 
@@ -40,8 +45,15 @@ export default class SoundBankManager extends BasicSoundBank {
         super();
         this.processor = processor;
         this.sequencer = sequencer;
-        const actualBank: BasicSoundBank =
-            bank ?? SoundBankLoader.fromArrayBuffer(dummy.slice());
+
+        let actualBank: BasicSoundBank;
+        if (bank) actualBank = bank;
+        else {
+            const b = SoundBankLoader.fromArrayBuffer(dummy.slice());
+            b.soundBankInfo.software = SOFTWARE_NAME;
+            actualBank = b;
+        }
+        this.writeType = actualBank.type;
         Object.assign(this, actualBank);
         if (bank === undefined) {
             this.soundBankInfo.name = "";
@@ -111,38 +123,126 @@ export default class SoundBankManager extends BasicSoundBank {
         this.destroySoundBank();
     }
 
-    async save(
-        format: "sf2" | "dls" | "sf3",
-        progressFunction?: ProgressFunction
-    ) {
+    async save(format: SaveFormat, progressFunction?: ProgressFunction) {
         let binary: ArrayBuffer;
+        const saveAs = format !== "auto";
         switch (format) {
             default:
+            case "auto": {
+                // Auto means the last write type
+                switch (this.writeType) {
+                    default:
+                    case "auto":
+                    case "sf2":
+                    case "sf3": {
+                        // SF2 write without compress/decompress preserves sf2/sf3
+                        binary = this.writeSF2({
+                            progressFunction,
+                            software: SOFTWARE_NAME
+                        });
+                        // Prevent writing .auto extension (will change to sf3 if needed)
+                        format = "sf2";
+                        break;
+                    }
+
+                    case "dls": {
+                        binary = this.writeDLS({
+                            progressFunction,
+                            software: SOFTWARE_NAME
+                        });
+                        format = "dls";
+                        break;
+                    }
+                }
+
+                break;
+            }
+
             case "sf2": {
-                binary = await this.writeSF2({
+                // SF2 means explicit decompression
+                this.writeType = "sf2";
+                await this.setSampleFormat({
+                    format: "pcm",
                     progressFunction
+                });
+                binary = this.writeSF2({
+                    progressFunction,
+                    software: SOFTWARE_NAME
                 });
                 break;
             }
 
             case "dls": {
-                binary = await this.writeDLS({
-                    progressFunction
+                this.writeType = "dls";
+                binary = this.writeDLS({
+                    progressFunction,
+                    software: SOFTWARE_NAME
                 });
                 break;
             }
 
             case "sf3": {
-                binary = await this.writeSF2({
-                    compress: true,
+                this.writeType = "sf3";
+                await this.setSampleFormat({
+                    format: "compressed",
                     compressionFunction: encodeVorbis,
+                    progressFunction
+                });
+                binary = this.writeSF2({
+                    software: SOFTWARE_NAME,
                     progressFunction
                 });
             }
         }
-        if (this.soundBankInfo.version.major === 3) {
+        // Ensure SF3
+        if (this.samples.some((s) => s.isCompressed)) {
             format = "sf3";
         }
+        try {
+            await this.saveToDisk(
+                binary,
+                `${this.getBankName("Unnamed")}.${format}`,
+                saveAs
+            );
+        } catch (error) {
+            console.error(error);
+            return false;
+        }
+        this.dirty = false;
+        this.changeCallback?.();
+        return true;
+    }
+
+    /**
+     * Performs the actual "saving" of the file (downloading).
+     * Uses File System Access API on supported browsers and Desktop Edition.
+     * @param binary the binary data
+     * @param name the suggested file
+     * @param overrideSaveHandle for FSA API only: shows a new file picker window even if we already have a save handle.
+     */
+    async saveToDisk(
+        binary: ArrayBuffer,
+        name: string,
+        overrideSaveHandle: boolean
+    ) {
+        // get file handle if we don't have it and the browser supports it
+        if (
+            (!this.saveHandle || overrideSaveHandle) &&
+            "showSaveFilePicker" in globalThis
+        ) {
+            this.saveHandle = await globalThis.showSaveFilePicker({
+                id: "spessafont-save-file",
+                suggestedName: name
+            });
+        }
+
+        if (this.saveHandle) {
+            const writable = await this.saveHandle.createWritable();
+            await writable.write(binary);
+            await writable.close();
+            return;
+        }
+
         const buffer = binary;
         let blob: Blob;
         if (buffer.byteLength > 2_147_483_648) {
@@ -162,10 +262,8 @@ export default class SoundBankManager extends BasicSoundBank {
         const a = document.createElement("a");
         const url = URL.createObjectURL(blob);
         a.href = url;
-        a.download = `${this.getBankName("Unnamed")}.${format}`;
+        a.download = name;
         a.click();
-        this.dirty = false;
-        this.changeCallback?.();
 
         // clean up the object URL after a short delay
         setTimeout(() => {

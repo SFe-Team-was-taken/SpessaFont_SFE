@@ -1,11 +1,10 @@
 import {
     type BasicPreset,
     type BasicPresetZone,
-    generatorTypes,
+    GeneratorTypes,
     type GenericRange
 } from "spessasynth_core";
 import "./preset_editor.css";
-import type { AudioEngine } from "../core_backend/audio_engine.ts";
 import type { SetViewType } from "../bank_editor/bank_editor.tsx";
 import { useEffect } from "react";
 import { cb2db, db2cb } from "../utils/conversion_helpers.ts";
@@ -16,71 +15,72 @@ import { GeneratorTable } from "../generator_table/generator_table.tsx";
 import { KEYBOARD_TARGET_CHANNEL } from "../keyboard/target_channel.ts";
 import { getZoneSplits } from "../utils/get_instrument_clickable_keys.ts";
 import type { ModulatorListGlobals } from "../modulator_editing/modulator_list/modulator_list.tsx";
+import { useAudioEngine } from "../core_backend/audio_engine_context.ts";
 
 const presetRows: GeneratorRowType[] = [
     {
-        generator: generatorTypes.keyRange
+        generator: GeneratorTypes.keyRange
     },
     {
-        generator: generatorTypes.velRange
+        generator: GeneratorTypes.velRange
     },
     {
-        generator: generatorTypes.initialAttenuation,
+        generator: GeneratorTypes.initialAttenuation,
         fromGenerator: (v) => v * 0.04,
         toGenerator: (v) => v / 0.04,
         unit: "dB",
         precision: 2
     },
     {
-        generator: generatorTypes.pan,
+        generator: GeneratorTypes.pan,
         unit: "pan"
     },
     {
-        generator: generatorTypes.coarseTune,
+        generator: GeneratorTypes.coarseTune,
         highlight: true
     },
     {
-        generator: generatorTypes.fineTune,
+        generator: GeneratorTypes.fineTune,
         highlight: true
     },
     {
-        generator: generatorTypes.scaleTuning,
+        generator: GeneratorTypes.scaleTuning,
         highlight: true,
         unit: "cent"
     },
     {
-        generator: generatorTypes.initialFilterFc,
+        generator: GeneratorTypes.initialFilterFc,
         unit: "acent"
     },
     {
-        generator: generatorTypes.initialFilterQ,
+        generator: GeneratorTypes.initialFilterQ,
         fromGenerator: cb2db,
         toGenerator: db2cb,
         precision: 1,
         unit: "dB"
     },
     {
-        generator: generatorTypes.delayVolEnv,
+        generator: GeneratorTypes.delayVolEnv,
         highlight: true,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.attackVolEnv,
+        generator: GeneratorTypes.attackVolEnv,
         highlight: true,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.holdVolEnv,
+        generator: GeneratorTypes.holdVolEnv,
         highlight: true,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.decayVolEnv,
+        generator: GeneratorTypes.decayVolEnv,
         highlight: true,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.sustainVolEnv,
+        generator: GeneratorTypes.sustainVolEnv,
         highlight: true,
         fromGenerator: cb2db,
         toGenerator: db2cb,
@@ -88,85 +88,85 @@ const presetRows: GeneratorRowType[] = [
         unit: "dB"
     },
     {
-        generator: generatorTypes.releaseVolEnv,
+        generator: GeneratorTypes.releaseVolEnv,
         highlight: true,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.keyNumToVolEnvHold,
-        highlight: true,
-        unit: "cent"
-    },
-    {
-        generator: generatorTypes.keyNumToVolEnvDecay,
+        generator: GeneratorTypes.keyNumToVolEnvHold,
         highlight: true,
         unit: "cent"
     },
     {
-        generator: generatorTypes.delayModEnv,
+        generator: GeneratorTypes.keyNumToVolEnvDecay,
+        highlight: true,
+        unit: "cent"
+    },
+    {
+        generator: GeneratorTypes.delayModEnv,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.attackModEnv,
+        generator: GeneratorTypes.attackModEnv,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.holdModEnv,
+        generator: GeneratorTypes.holdModEnv,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.decayModEnv,
+        generator: GeneratorTypes.decayModEnv,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.sustainModEnv,
+        generator: GeneratorTypes.sustainModEnv,
         fromGenerator: (v) => v / 10,
         toGenerator: (v) => v * 10,
         precision: 1,
         unit: "percent"
     },
     {
-        generator: generatorTypes.releaseModEnv,
+        generator: GeneratorTypes.releaseModEnv,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.modEnvToFilterFc,
+        generator: GeneratorTypes.modEnvToFilterFc,
         unit: "cent"
     },
     {
-        generator: generatorTypes.modEnvToPitch,
+        generator: GeneratorTypes.modEnvToPitch,
         unit: "cent"
     },
     {
-        generator: generatorTypes.keyNumToModEnvHold,
+        generator: GeneratorTypes.keyNumToModEnvHold,
         unit: "cent"
     },
     {
-        generator: generatorTypes.keyNumToModEnvDecay,
+        generator: GeneratorTypes.keyNumToModEnvDecay,
         unit: "cent"
     },
     {
-        generator: generatorTypes.delayModLFO,
+        generator: GeneratorTypes.delayModLFO,
         highlight: true,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.freqModLFO,
+        generator: GeneratorTypes.freqModLFO,
         highlight: true,
         unit: "acent"
     },
     {
-        generator: generatorTypes.modLfoToPitch,
+        generator: GeneratorTypes.modLfoToPitch,
         highlight: true,
         unit: "cent"
     },
     {
-        generator: generatorTypes.modLfoToFilterFc,
+        generator: GeneratorTypes.modLfoToFilterFc,
         highlight: true,
         unit: "cent"
     },
     {
-        generator: generatorTypes.modLfoToVolume,
+        generator: GeneratorTypes.modLfoToVolume,
         highlight: true,
         fromGenerator: cb2db,
         toGenerator: db2cb,
@@ -174,19 +174,19 @@ const presetRows: GeneratorRowType[] = [
         unit: "dB"
     },
     {
-        generator: generatorTypes.delayVibLFO,
+        generator: GeneratorTypes.delayVibLFO,
         unit: "tcent"
     },
     {
-        generator: generatorTypes.freqVibLFO,
+        generator: GeneratorTypes.freqVibLFO,
         unit: "acent"
     },
     {
-        generator: generatorTypes.vibLfoToPitch,
+        generator: GeneratorTypes.vibLfoToPitch,
         unit: "cent"
     },
     {
-        generator: generatorTypes.chorusEffectsSend,
+        generator: GeneratorTypes.chorusEffectsSend,
         highlight: true,
         fromGenerator: (v) => v / 10,
         toGenerator: (v) => v * 10,
@@ -194,7 +194,7 @@ const presetRows: GeneratorRowType[] = [
         unit: "percent"
     },
     {
-        generator: generatorTypes.reverbEffectsSend,
+        generator: GeneratorTypes.reverbEffectsSend,
         highlight: true,
         fromGenerator: (v) => v / 10,
         toGenerator: (v) => v * 10,
@@ -205,7 +205,6 @@ const presetRows: GeneratorRowType[] = [
 
 export function PresetEditor({
     preset,
-    engine,
     presets,
     setPresets,
     setView,
@@ -216,25 +215,27 @@ export function PresetEditor({
     clipboardManager
 }: {
     preset: BasicPreset;
-    engine: AudioEngine;
     presets: BasicPreset[];
     setPresets: (p: BasicPreset[]) => unknown;
     setView: SetViewType;
     manager: SoundBankManager;
     setSplits: (s: GenericRange[]) => unknown;
 } & ModulatorListGlobals) {
+    const {
+        audioEngine: { processor }
+    } = useAudioEngine();
     const update = () => {
         preset.zones = [...preset.zones];
         setPresets([...presets]);
-        engine.processor.clearCache();
+        processor.clearCache();
     };
     const presetZones = preset.zones;
     const global = preset.globalZone;
 
     useEffect(() => {
-        engine.processor.midiChannels[KEYBOARD_TARGET_CHANNEL].preset = preset;
-        engine.processor.clearCache();
-    }, [engine.processor, preset]);
+        processor.midiChannels[KEYBOARD_TARGET_CHANNEL].preset = preset;
+        processor.clearCache();
+    }, [processor, preset]);
 
     useEffect(() => {
         const splits: GenericRange[] = [];

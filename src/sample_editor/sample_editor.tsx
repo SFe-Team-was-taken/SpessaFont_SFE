@@ -2,11 +2,10 @@ import {
     BasicInstrument,
     BasicPreset,
     type BasicSample,
-    generatorTypes,
+    GeneratorTypes,
     type SampleType,
-    sampleTypes
+    SampleTypes
 } from "spessasynth_core";
-import type { AudioEngine } from "../core_backend/audio_engine.ts";
 import "./sample_editor.css";
 import * as React from "react";
 import { useCallback, useEffect, useState } from "react";
@@ -22,6 +21,7 @@ import { SetSampleTypeAction } from "./set_sample_type_action.ts";
 import { EditSampleAction } from "./edit_sample_action.ts";
 import { SampleTools } from "./sample_tools.tsx";
 import { midiNoteToPitchClass } from "../utils/note_name.ts";
+import { useAudioEngine } from "../core_backend/audio_engine_context.ts";
 
 const MIN_SAMPLE_RATE = 8000;
 const MAX_SAMPLE_RATE = 192_000;
@@ -31,14 +31,12 @@ export type SamplePlayerState = "stopped" | "playing" | "playing_loop";
 interface SampleEditorProps {
     manager: SoundBankManager;
     sample: BasicSample;
-    engine: AudioEngine;
     setView: SetViewType;
     setSamples: (s: BasicSample[]) => void;
     samples: BasicSample[];
 }
 
 export const SampleEditor = React.memo(function ({
-    engine,
     sample,
     setView,
     manager,
@@ -46,6 +44,9 @@ export const SampleEditor = React.memo(function ({
     samples
 }: SampleEditorProps) {
     const { t } = useTranslation();
+    const {
+        audioEngine: { processor }
+    } = useAudioEngine();
     const [sampleData, setSampleDataLocal] = useState(sample.getAudioData());
 
     useEffect(() => {
@@ -76,17 +77,17 @@ export const SampleEditor = React.memo(function ({
         const instZone = instrument.createZone(sample);
         // unlink here as we don't want to mark it as linked
         sample.unlinkFrom(instrument);
-        instZone.setGenerator(generatorTypes.sampleModes, 1);
-        engine.processor.midiChannels[KEYBOARD_TARGET_CHANNEL].preset = preset;
+        instZone.setGenerator(GeneratorTypes.sampleModes, 1);
+        processor.midiChannels[KEYBOARD_TARGET_CHANNEL].preset = preset;
 
-        engine.processor.clearCache();
+        processor.clearCache();
         return () => {
-            engine.processor.clearCache();
+            processor.clearCache();
             if (manager?.presets?.length > 0) {
-                engine.processor.programChange(KEYBOARD_TARGET_CHANNEL, 0);
+                processor.programChange(KEYBOARD_TARGET_CHANNEL, 0);
             }
         };
-    }, [engine.processor, engine.processor.midiChannels, manager, sample]);
+    }, [processor, processor.midiChannels, manager, sample]);
 
     const sampleType = sample.sampleType;
     const linkedSample = sample.linkedSample;
@@ -152,10 +153,7 @@ export const SampleEditor = React.memo(function ({
 
     const loopEnd = sample.loopEnd;
     const setLoopEnd = (newEnd: number) => {
-        newEnd = Math.min(
-            Math.max(newEnd, loopStart, 0),
-            sampleData.length - 1
-        );
+        newEnd = Math.min(Math.max(newEnd, loopStart, 0), sampleData.length);
         if (newEnd === loopEnd) {
             return newEnd;
         }
@@ -175,9 +173,9 @@ export const SampleEditor = React.memo(function ({
 
         // automatically add "R" or "L" for linked stereo samples, making sure to do so for the other linked sample
         if (linkedSample) {
-            if (sample.sampleType === sampleTypes.rightSample) {
+            if (sample.sampleType === SampleTypes.rightSample) {
                 newName += "R";
-            } else if (sample.sampleType === sampleTypes.leftSample) {
+            } else if (sample.sampleType === SampleTypes.leftSample) {
                 newName += "L";
             }
         }
@@ -193,9 +191,9 @@ export const SampleEditor = React.memo(function ({
         ];
         if (linkedSample) {
             let secondNewName = n;
-            if (sample.sampleType === sampleTypes.rightSample) {
+            if (sample.sampleType === SampleTypes.rightSample) {
                 secondNewName += "L";
-            } else if (sample.sampleType === sampleTypes.leftSample) {
+            } else if (sample.sampleType === SampleTypes.leftSample) {
                 secondNewName += "R";
             }
             actions.push(
@@ -260,7 +258,6 @@ export const SampleEditor = React.memo(function ({
                 loopStart={loopStart}
                 loopEnd={loopEnd}
                 sampleRate={sampleRate}
-                context={engine.context}
                 playerState={playerState}
                 playbackStartTime={playbackStart}
                 centCorrection={centCorrection}
@@ -271,7 +268,7 @@ export const SampleEditor = React.memo(function ({
                     value={sampleName}
                     maxLength={40}
                     className={"pretty_input sample_name monospaced"}
-                    placeholder={t("sampleLocale.name")}
+                    placeholder={t("sampleLocale.sampleName")}
                 />
                 <div className={"info_split"}>
                     <div className={"info_column"}>
@@ -310,7 +307,7 @@ export const SampleEditor = React.memo(function ({
                                     className={"pretty_input monospaced"}
                                     type={"number"}
                                     min={loopStart}
-                                    max={sampleData.length - 1}
+                                    max={sampleData.length}
                                     placeholder={t("sampleLocale.loopEnd")}
                                 ></WaitingInput>
                             </div>
@@ -361,7 +358,6 @@ export const SampleEditor = React.memo(function ({
                         setPlayerState={setPlayerState}
                         setPlaybackStart={setPlaybackStart}
                         sample={sample}
-                        engine={engine}
                         setLoopStart={setLoopStart}
                         setLoopEnd={setLoopEnd}
                         sampleData={sampleData}

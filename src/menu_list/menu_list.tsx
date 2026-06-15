@@ -6,7 +6,6 @@ import "./menu_list.css";
 import SoundBankManager, {
     type BankEditView
 } from "../core_backend/sound_bank_manager.ts";
-import type { AudioEngine } from "../core_backend/audio_engine.ts";
 import type { SetViewType } from "../bank_editor/bank_editor.tsx";
 import type { ClipboardManager } from "../core_backend/clipboard_manager.ts";
 import { SampleList } from "./sample_list.tsx";
@@ -31,7 +30,6 @@ interface MenuListProps {
     manager: SoundBankManager;
     view: BankEditView;
     sv: SetViewType;
-    engine: AudioEngine;
     samples: BasicSample[];
     setSamples: (s: BasicSample[]) => unknown;
     instruments: BasicInstrument[];
@@ -45,7 +43,6 @@ export const MenuList = React.memo(function ({
     view,
     sv,
     manager,
-    engine,
     setSamples,
     samples,
     instruments,
@@ -290,13 +287,9 @@ export const MenuList = React.memo(function ({
                 for (const z of i.zones) matchedSampleSet.add(z.sample);
 
             return {
-                filteredSamples: samples.filter((s) => matchedSampleSet.has(s)),
-                filteredInstruments: instruments.filter((i) =>
-                    matchedInstrumentSet.has(i)
-                ),
-                filteredPresets: presetNameMap.filter((p) =>
-                    matchedPresetSet.has(p)
-                )
+                filteredSamples: Array.from(matchedSampleSet),
+                filteredInstruments: Array.from(matchedInstrumentSet),
+                filteredPresets: Array.from(matchedPresetSet)
             };
         }, [searchQueryLower, samples, instruments, presetNameMap]);
 
@@ -333,7 +326,6 @@ export const MenuList = React.memo(function ({
                     samples={filteredSamples}
                     view={view}
                     manager={manager}
-                    engine={engine}
                     setSamples={setSamples}
                     setView={setView}
                     clipboard={clipboard}

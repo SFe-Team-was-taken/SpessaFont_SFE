@@ -2,17 +2,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SamplePlayerState } from "./sample_editor.tsx";
 import { ControllerRange } from "../fancy_inputs/controller_range/controller_range.tsx";
 import { useTranslation } from "react-i18next";
-import { audioToWav, type BasicSample, sampleTypes } from "spessasynth_core";
-import type { AudioEngine } from "../core_backend/audio_engine.ts";
+import { audioToWav, type BasicSample, SampleTypes } from "spessasynth_core";
 import toast from "react-hot-toast";
+import { useAudioEngine } from "../core_backend/audio_engine_context.ts";
 
 const DEFAULT_SAMPLE_GAIN = 0.4;
 
 const ZOOM_PER_SAMPLE = 50_000 / 6_000_000;
 
+const exportWavData = (data: Float32Array, rate: number, name: string) => {
+    const buf = audioToWav([data], rate, {
+        normalizeAudio: false
+    });
+    const blob = new Blob([buf], {
+        type: "audio/wav"
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${name}.wav`;
+    console.info(a);
+    a.click();
+};
+
 export function SampleTools({
     sample,
-    engine,
     playerState,
     setPlayerState,
     setPlaybackStart,
@@ -26,7 +39,6 @@ export function SampleTools({
     setLoopEnd
 }: {
     sample: BasicSample;
-    engine: AudioEngine;
     playerState: SamplePlayerState;
     setPlayerState: (s: SamplePlayerState) => unknown;
     setPlaybackStart: (s: number) => unknown;
@@ -40,6 +52,9 @@ export function SampleTools({
     setLoopEnd: (e: number) => unknown;
 }) {
     const { t } = useTranslation();
+    const {
+        audioEngine: { context, targetNode }
+    } = useAudioEngine();
     const sampleName = sample.name;
     const sampleRate = sample.sampleRate;
     const centCorrection = sample.pitchCorrection;
@@ -47,15 +62,16 @@ export function SampleTools({
     const loopEnd = sample.loopEnd;
     const sampleType = sample.sampleType;
     const linkedSample = sample.linkedSample;
+    const audioData = sample.getAudioData();
 
     const [inputZoom, setInputZoom] = useState(100);
 
     const buffer = useMemo(() => {
         // resample if sample range is ridiculous
         // test case: Calm 4 with a whopping 384 kHz
-
-        let audioData = sample.getAudioData();
         let bufferRate = sampleRate;
+        // Audio data is grabbed outside to reflect updates, such as "normalize"
+        let targetData = audioData;
         if (sampleRate < 8000 || sampleRate > 96_000) {
             // resample to 48kHz
             const ratio = 48_000 / sampleRate;
@@ -65,18 +81,18 @@ export function SampleTools({
             for (let i = 0; i < resampled.length; i++) {
                 resampled[i] = audioData[Math.floor(i * (1 / ratio))];
             }
-            audioData = resampled;
+            targetData = resampled;
             bufferRate = 48_000;
         }
 
-        const buf = engine.context.createBuffer(
+        const buf = context.createBuffer(
             1,
-            Math.max(audioData.length, 2),
+            Math.max(targetData.length, 2),
             bufferRate
         );
-        buf.getChannelData(0).set(audioData);
+        buf.getChannelData(0).set(targetData);
         return buf;
-    }, [sample, sampleRate, engine.context]);
+    }, [sampleRate, audioData, context]);
 
     const playerRef = useRef<AudioBufferSourceNode | null>(null);
 
@@ -129,7 +145,7 @@ export function SampleTools({
     const playSample = useCallback(
         (loop: boolean) => {
             stopSampleInternal();
-            const player = engine.context.createBufferSource();
+            const player = context.createBufferSource();
             player.detune.value = centCorrection;
             player.buffer = buffer;
             player.onended = stopPlayer;
@@ -140,19 +156,19 @@ export function SampleTools({
                 player.loop = true;
             }
 
-            const gain = new GainNode(engine.context, {
+            const gain = new GainNode(context, {
                 gain: DEFAULT_SAMPLE_GAIN
             });
-            player.connect(gain).connect(engine.targetNode);
-            setPlaybackStart(engine.context.currentTime - 0.1);
+            player.connect(gain).connect(targetNode);
+            setPlaybackStart(context.currentTime - 0.1);
             player.start();
             setPlayerState(loop ? "playing_loop" : "playing");
         },
         [
             buffer,
             centCorrection,
-            engine.context,
-            engine.targetNode,
+            context,
+            targetNode,
             loopEnd,
             loopStart,
             sampleRate,
@@ -173,17 +189,12 @@ export function SampleTools({
     }, [playSample, playerState, stopPlayer]);
 
     const exportWav = () => {
-        const buf = audioToWav([buffer.getChannelData(0)], buffer.sampleRate, {
-            normalizeAudio: false
-        });
-        const blob = new Blob([buf], {
-            type: "audio/wav"
-        });
-        const a = document.createElement("a");
-        a.href = URL.createObjectURL(blob);
-        a.download = `${sampleName}.wav`;
-        console.info(a);
-        a.click();
+        exportWavData(buffer.getChannelData(0), buffer.sampleRate, sampleName);
+    };
+
+    const exportWavLoop = () => {
+        const loopData = buffer.getChannelData(0).slice(loopStart, loopEnd);
+        exportWavData(loopData, buffer.sampleRate, `${sampleName}_loop`);
     };
 
     const replaceData = () => {
@@ -199,7 +210,7 @@ export function SampleTools({
             setLoading(true);
             let audioBuffer: AudioBuffer;
             try {
-                audioBuffer = await engine.context.decodeAudioData(
+                audioBuffer = await context.decodeAudioData(
                     await file.arrayBuffer()
                 );
             } catch {
@@ -214,22 +225,22 @@ export function SampleTools({
                 const right = audioBuffer.getChannelData(1);
                 // check for linked sample
                 if (
-                    (sampleType === sampleTypes.leftSample ||
-                        sampleType === sampleTypes.rightSample) &&
+                    (sampleType === SampleTypes.leftSample ||
+                        sampleType === SampleTypes.rightSample) &&
                     linkedSample
                 ) {
                     const linked = linkedSample;
 
-                    if (sampleType === sampleTypes.leftSample) {
+                    if (sampleType === SampleTypes.leftSample) {
                         linked.setAudioData(right, audioBuffer.sampleRate);
                         linked.loopStart = 0;
-                        linked.loopEnd = right.length - 1;
+                        linked.loopEnd = right.length;
 
                         setSampleData(left, audioBuffer.sampleRate);
                     } else {
                         linked.setAudioData(left, audioBuffer.sampleRate);
                         linked.loopStart = 0;
-                        linked.loopEnd = left.length - 1;
+                        linked.loopEnd = left.length;
 
                         setSampleData(right, audioBuffer.sampleRate);
                     }
@@ -241,7 +252,7 @@ export function SampleTools({
                     }
                     setSampleData(finalData, audioBuffer.sampleRate);
                     setLoopStart(0);
-                    setLoopEnd(finalData.length - 1);
+                    setLoopEnd(finalData.length);
                 }
             } else if (audioBuffer.numberOfChannels === 1) {
                 audioBuffer.copyFromChannel(audioBuffer.getChannelData(0), 0);
@@ -277,6 +288,12 @@ export function SampleTools({
                 onClick={exportWav}
             >
                 {t("sampleLocale.tools.wavExport")}
+            </div>
+            <div
+                className={`pretty_button monospaced ${loading ? "" : "responsive_button hover_brightness"}`}
+                onClick={exportWavLoop}
+            >
+                {t("sampleLocale.tools.wavExportLoop")}
             </div>
             {playerState === "stopped" && (
                 <>

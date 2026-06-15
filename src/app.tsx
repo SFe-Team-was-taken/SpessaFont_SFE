@@ -1,61 +1,27 @@
 import { MenuBar } from "./menu_bar/menu_bar.tsx";
-import { loadSettings } from "./settings/save_load/load.ts";
 import {
-    applyAudioSettings,
     getSetting,
-    UNSET_LANGUAGE
+    type SavedSettingsType
 } from "./settings/save_load/settings_typedef.ts";
-import {
-    DEFAULT_LOCALE,
-    getUserLocale
-} from "./settings/save_load/get_user_locale.ts";
-import i18next from "i18next";
-import { initReactI18next, useTranslation } from "react-i18next";
+import { useTranslation } from "react-i18next";
 import SoundBankManager from "./core_backend/sound_bank_manager.ts";
-import { GetUserInput } from "./get_user_input/get_user_input.tsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AudioEngine } from "./core_backend/audio_engine.ts";
 import { ClipboardManager } from "./core_backend/clipboard_manager.ts";
 import { Settings } from "./settings/settings.tsx";
 import { TabList } from "./tab_list/tab_list.tsx";
-import { LocaleList } from "./locale/locale_list.ts";
 import { KeyboardController } from "./keyboard/keyboard_controller.tsx";
 import { DestinationsOptions } from "./utils/translated_options/destination_options.tsx";
 import { ModulableControllerOptions } from "./utils/translated_options/modulable_controller_options.tsx";
-import {
-    type BankEditorRef,
-    MemoizedBankEditor
-} from "./bank_editor/bank_editor.tsx";
+import { BankEditor, type BankEditorRef } from "./bank_editor/bank_editor.tsx";
 import { ACCEPTED_FORMATS } from "./utils/accepted_formats.ts";
 import { loadSoundBank } from "./core_backend/load_sound_bank.ts";
 import type { BasicSoundBank, GenericRange } from "spessasynth_core";
 import toast, { Toaster } from "react-hot-toast";
 import "./toasts.css";
 import { Welcome } from "./welcome/welcome.tsx";
-import { readSampleRateParam } from "./utils/sample_rate_param.ts"; // apply locale
-
-// apply locale
-const initialSettings = loadSettings();
-let targetLocale = getSetting("lang", initialSettings);
-if (targetLocale === UNSET_LANGUAGE) {
-    targetLocale = getUserLocale();
-}
-
-void i18next.use(initReactI18next).init({
-    resources: LocaleList,
-    lng: targetLocale,
-    fallbackLng: DEFAULT_LOCALE
-});
-
-const context = new AudioContext({
-    sampleRate: readSampleRateParam(),
-    latencyHint: "interactive"
-});
-
-// shared audio engine, the bank will swap on switching tabs
-const audioEngine = new AudioEngine(context);
-
-applyAudioSettings(initialSettings, audioEngine);
+import type { ElectronAPI } from "./types/electron.ts";
+import { IS_CHROME, IS_ELECTRON } from "./utils/environment_detection.ts";
+import { useAudioEngine } from "./core_backend/audio_engine_context.ts"; // apply locale
 
 // shared clipboard
 const clipboardManager = new ClipboardManager();
@@ -72,13 +38,15 @@ interface GlobalThisLaunch {
     launchQueue?: LaunchQueue;
 }
 
-if (navigator.serviceWorker) {
+// Service workers are unsafe on electron
+if (navigator.serviceWorker && !IS_ELECTRON) {
     await navigator.serviceWorker.register("service-worker.js");
     console.info("Registered service worker");
 }
 
-function App() {
+function App({ initialSettings }: { initialSettings: SavedSettingsType }) {
     const { t } = useTranslation();
+    const { audioEngine } = useAudioEngine();
     const [tabs, setTabs] = useState<SoundBankManager[]>([]);
     const [showKeyboard, setShowKeyboard] = useState(false);
     const [settings, setSettings] = useState(false);
@@ -93,7 +61,7 @@ function App() {
     );
 
     // cached translated options
-    // note: i can't use JSX here as it calls MCO 9 times for some reason?
+    // note: I can't use JSX here as it calls MCO 9 times for some reason?
     const ccOptions = useMemo(
         () => ModulableControllerOptions({ t: t, padLength: 5 }),
         [t]
@@ -103,13 +71,27 @@ function App() {
         [t]
     );
 
+    // Theme change, on #root for audio provider to be themed as well
     useEffect(() => {
-        if (tabs.length > 0 && tabs[activeTab]) {
-            tabs[activeTab].sendBankToSynth();
-        } else {
-            audioEngine.pauseMIDI();
+        switch (theme) {
+            default:
+            case "dark": {
+                document.querySelector("#root")!.classList.remove("light_mode");
+                break;
+            }
+
+            case "light": {
+                document.querySelector("#root")!.classList.add("light_mode");
+            }
         }
-    }, [activeTab, tabs]);
+    });
+
+    // Pause MIDI when unloading tabs
+    useEffect(() => {
+        if (tabs.length > 0 && tabs[activeTab])
+            tabs[activeTab].sendBankToSynth();
+        else audioEngine.pauseMIDI();
+    }, [activeTab, audioEngine, tabs]);
 
     const toggleSettings = () => setSettings(!settings);
 
@@ -131,8 +113,11 @@ function App() {
             const id = toast.loading(t("loadingAndSaving.loadingFileFromDisk"));
             let bank: BasicSoundBank | undefined = undefined;
             if (bankFile instanceof File) {
-                // @ts-expect-error chrome property
-                if (bankFile.size > 2_147_483_648 && globalThis.chrome) {
+                if (
+                    bankFile.size > 2_147_483_648 &&
+                    IS_CHROME &&
+                    !IS_ELECTRON
+                ) {
                     // this not anti-chrome code,
                     // loading 4GB sound banks throws NotReadable error,
                     // uncomment this code and try it for yourself
@@ -150,9 +135,16 @@ function App() {
                 } catch (error) {
                     console.error(error);
                     toast.dismiss(id);
-                    // make so the error appears at the bottom
-                    toast.error(`${error as string}`);
-                    toast.error(t("loadingAndSaving.errorLoadingSoundBank"));
+                    if ((error as Error).name === "NotReadableError") {
+                        // special Electron error
+                        toast.error(t("loadingAndSaving.electronError"));
+                    } else {
+                        // make so the error appears at the bottom
+                        toast.error(`${error as string}`);
+                        toast.error(
+                            t("loadingAndSaving.errorLoadingSoundBank")
+                        );
+                    }
                     return;
                 }
             }
@@ -168,21 +160,59 @@ function App() {
             setTabs((prev) => [newManager, ...prev]);
             setActiveTab(0); // newly added tab
         },
-        [t]
+        [audioEngine.processor, audioEngine.sequencer, t]
     );
 
+    // Electron ready signal
+    useEffect(() => {
+        if (IS_ELECTRON && "electronAPI" in globalThis) {
+            const api = (globalThis as unknown as { electronAPI: ElectronAPI })
+                .electronAPI;
+            api.appReady();
+        }
+    }, []);
+
+    // Loading files with electron or launch queue
     useEffect(() => {
         if ("launchQueue" in globalThis) {
             const launch = (globalThis as GlobalThisLaunch).launchQueue!;
             launch.setConsumer(async (launchParams) => {
                 await audioEngine.context.resume();
                 for (const fileHandle of launchParams.files) {
+                    console.info(`Opening file ${fileHandle.name}`);
                     const file = await fileHandle.getFile();
                     await openNewBankTab(file);
                 }
             });
         }
-    }, [openNewBankTab]);
+        if ("electronAPI" in globalThis) {
+            const api = (globalThis as unknown as { electronAPI: ElectronAPI })
+                .electronAPI;
+
+            api.onFileOpened(async (path: string) => {
+                try {
+                    await audioEngine.context.resume();
+                    console.info(`Attempting to open ${path}`);
+                    const response = await fetch(`file://${path}`);
+                    const blob = await response.blob();
+
+                    const file = new File(
+                        [blob],
+                        path.split("/").pop() ?? "soundfont"
+                    );
+
+                    await openNewBankTab(file);
+                } catch (error) {
+                    toast.error(
+                        `Failed to open file ${path.split("/").at(-1)}\n` +
+                            `${(error as Error).message}\n` +
+                            "Are you in development mode?"
+                    );
+                }
+            });
+            console.info("Connected to Electron file handlers");
+        }
+    }, [audioEngine.context, openNewBankTab]);
 
     const openFile = useCallback(() => {
         const input = document.createElement("input");
@@ -262,15 +292,12 @@ function App() {
     const showEditor = !showWelcome && !showSettings && !!currentManager;
 
     return (
-        <div
-            className={`spessafont_main ${theme === "light" ? "light_mode" : ""}`}
-        >
+        <div className={`spessafont_main`}>
             <Toaster toastOptions={{ className: "toasts" }} />
             <MenuBar
                 bankEditorRef={bankEditorRef}
                 showMidiPlayer={tabs.length > 0}
                 toggleSettings={toggleSettings}
-                audioEngine={audioEngine}
                 openTab={openNewBankTab as () => void}
                 closeTab={() => closeTab(activeTab)}
                 manager={currentManager}
@@ -285,18 +312,15 @@ function App() {
                 />
             )}
 
-            {showSettings && (
-                <Settings setTheme={setTheme} engine={audioEngine} />
-            )}
+            {showSettings && <Settings setTheme={setTheme} />}
 
             {currentManager && (
-                <MemoizedBankEditor
+                <BankEditor
                     ref={bankEditorRef}
                     shown={showEditor}
                     destinationOptions={destinationOptions}
                     ccOptions={ccOptions}
                     manager={currentManager}
-                    audioEngine={audioEngine}
                     clipboardManager={clipboardManager}
                     setSplits={setSplits}
                 />
@@ -310,11 +334,8 @@ function App() {
                 <KeyboardController
                     splits={splits}
                     ccOptions={ccOptions}
-                    engine={audioEngine}
                 ></KeyboardController>
             )}
-
-            <GetUserInput audioEngine={audioEngine} />
         </div>
     );
 }

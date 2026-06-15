@@ -1,18 +1,22 @@
 import {
     type BasicMIDI,
     BasicSoundBank,
-    midiMessageTypes,
+    MIDIMessageTypes,
     SoundBankLoader,
-    SpessaSynthLogging,
+    SpessaLog,
     SpessaSynthProcessor,
     SpessaSynthSequencer
 } from "spessasynth_core";
 import { logInfo } from "../utils/core_utils.ts";
+import {
+    getSetting,
+    type SavedSettingsType
+} from "../settings/save_load/settings_typedef.ts";
 
 // audio worklet processor operates at that
 const BLOCK_SIZE = 128;
 const MAX_CHUNKS_QUEUED = 16; // 16 * 128 = 2,048 // Windows does not like small buffer sizes
-const MAX_RENDERED_AT_ONCE = 4;
+const MAX_RENDERED_AT_ONCE = 6;
 
 const dummy = BasicSoundBank.getSampleSoundBankFile();
 
@@ -29,6 +33,7 @@ export class AudioEngine {
     audioChunksQueued = 0;
 
     readonly maxChunksQueued;
+    private readonly currentSampleRate;
 
     private worklet: AudioWorkletNode | undefined;
     private processorTime = {
@@ -36,10 +41,9 @@ export class AudioEngine {
         time: 0
     };
 
-    constructor(context: AudioContext) {
+    constructor(context: AudioContext, initialSettings: SavedSettingsType) {
         this.context = context;
         this.processor = new SpessaSynthProcessor(context.sampleRate, {
-            enableEffects: true,
             initialTime: context.currentTime
         });
         this.maxChunksQueued = Math.min(
@@ -49,11 +53,9 @@ export class AudioEngine {
             ),
             32
         );
-        void dummy.then((d) =>
-            this.processor.soundBankManager.addSoundBank(
-                SoundBankLoader.fromArrayBuffer(d.slice()),
-                "main"
-            )
+        this.processor.soundBankManager.addSoundBank(
+            SoundBankLoader.fromArrayBuffer(dummy.slice()),
+            "main"
         );
 
         this.sequencer = new SpessaSynthSequencer(this.processor);
@@ -67,7 +69,10 @@ export class AudioEngine {
         if (isDev) {
             logInfo("Dev mode on");
         }
-        SpessaSynthLogging(isDev, isDev, isDev);
+        SpessaLog.setLogLevel(isDev, isDev, isDev);
+
+        this.currentSampleRate = context.sampleRate;
+        this.applySettings(initialSettings);
     }
 
     get MIDIPaused() {
@@ -89,22 +94,53 @@ export class AudioEngine {
 
     public ccChangeRealTime(ch: number, cc: number, value: number) {
         this.processRealTime([
-            midiMessageTypes.controllerChange | (ch % 16),
+            MIDIMessageTypes.controllerChange | (ch % 16),
             cc,
             value
         ]);
     }
 
     public noteOffRealTime(ch: number, note: number) {
-        this.processRealTime([midiMessageTypes.noteOff | (ch % 16), note]);
+        this.processRealTime([MIDIMessageTypes.noteOff | (ch % 16), note]);
     }
 
     public noteOnRealTime(ch: number, note: number, velocity: number) {
         this.processRealTime([
-            midiMessageTypes.noteOn | (ch % 16),
+            MIDIMessageTypes.noteOn | (ch % 16),
             note,
             velocity
         ]);
+    }
+
+    applySettings(settings: SavedSettingsType) {
+        const processor = this.processor;
+        this.setVolume(getSetting("volume", settings));
+        processor.setSystemParameter(
+            "interpolationType",
+            getSetting("interpolation", settings)
+        );
+        processor.setSystemParameter(
+            "reverbGain",
+            getSetting("reverbLevel", settings)
+        );
+        processor.setSystemParameter(
+            "chorusGain",
+            getSetting("chorusLevel", settings)
+        );
+        processor.setSystemParameter(
+            "delayGain",
+            getSetting("delayLevel", settings)
+        );
+        processor.setSystemParameter(
+            "voiceCap",
+            getSetting("voiceCap", settings)
+        );
+        const rate = getSetting("sampleRate", settings);
+        if (this.currentSampleRate !== rate) {
+            const url = new URL(globalThis.location.href);
+            url.searchParams.set("samplerate", rate.toString());
+            globalThis.location.replace(url);
+        }
     }
 
     async resumeContext() {
@@ -165,7 +201,7 @@ export class AudioEngine {
             transferList.push(dataChunk.buffer);
         }
         this.processorTime.taken = performance.now();
-        this.processorTime.time = this.processor.currentSynthTime;
+        this.processorTime.time = this.processor.currentTime;
 
         // send to worklet
         if (this.worklet) {

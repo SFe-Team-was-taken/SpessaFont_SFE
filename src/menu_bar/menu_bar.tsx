@@ -1,10 +1,8 @@
 import { MenuBarDropdown, MenuBarIcon } from "./dropdown.tsx";
-import type SoundBankManager from "../core_backend/sound_bank_manager.ts";
 import { MIDIPlayer } from "./midi_player.tsx";
 import { VoiceDisplay } from "./voice_display.tsx";
 import "./menu_bar.css";
 import { useTranslation } from "react-i18next";
-import type { AudioEngine } from "../core_backend/audio_engine.ts";
 import { useCallback, useEffect } from "react";
 import type { BankEditorRef } from "../bank_editor/bank_editor.tsx";
 import { ACCEPTED_FORMATS } from "../utils/accepted_formats.ts";
@@ -25,15 +23,15 @@ import {
     UndoIcon
 } from "../utils/icons.tsx";
 import type { ProgressFunction } from "spessasynth_core";
-
-// @ts-expect-error chromium check is here
-const isChrome: boolean = globalThis.chrome !== undefined;
+import SoundBankManager, {
+    type SaveFormat
+} from "../core_backend/sound_bank_manager.ts";
+import { IS_CHROME, IS_ELECTRON } from "../utils/environment_detection.ts";
 
 const waitForRefresh = () => new Promise((r) => setTimeout(r, 200));
 
 export function MenuBar({
     toggleSettings,
-    audioEngine,
     openTab,
     closeTab,
     manager,
@@ -41,7 +39,6 @@ export function MenuBar({
     toggleKeyboard,
     bankEditorRef
 }: {
-    audioEngine: AudioEngine;
     toggleSettings: () => void;
     openTab: (b?: File) => void;
     closeTab: () => void;
@@ -72,29 +69,26 @@ export function MenuBar({
         openTab();
     }
 
-    const saveWithToasts = useCallback(
-        async (format: "sf2" | "dls" | "sf3") => {
+    const performSave = useCallback(
+        async (format: SaveFormat) => {
             const id = toast.loading(t("loadingAndSaving.savingSoundBank"));
             await waitForRefresh();
             try {
-                await manager.save(format, ((
-                    _sampleName,
-                    writtenCount,
-                    totalSampleCount
-                ) => {
+                const saved = await manager.save(format, ((progress) => {
                     toast.loading(
                         `${t("loadingAndSaving.writingSamples")} (${
-                            Math.floor(
-                                (writtenCount / totalSampleCount) * 10_000
-                            ) /
-                                100 +
-                            "%"
+                            Math.floor(progress * 10_000) / 100 + "%"
                         })`,
                         {
                             id
                         }
                     );
                 }) as ProgressFunction);
+                if (!saved) {
+                    // don't show success
+                    toast.dismiss(id);
+                    return;
+                }
             } catch (error) {
                 // make so the error appears at the bottom
                 toast.error(`${error as string}`);
@@ -104,6 +98,42 @@ export function MenuBar({
             toast.success(t("loadingAndSaving.savedSuccessfully"), { id });
         },
         [manager, t]
+    );
+
+    const saveWithToasts = useCallback(
+        (format: SaveFormat) => {
+            if (
+                format === "sf2" &&
+                manager.samples.some((s) => s.isCompressed)
+            ) {
+                toast(
+                    (tost) => (
+                        <div className={"toast_col"}>
+                            <span>{t(fLoc + "warnSF2")}</span>
+                            <span
+                                onClick={() => {
+                                    toast.dismiss(tost.id);
+                                    void performSave(format);
+                                }}
+                                className={"pretty_outline"}
+                            >
+                                {t("yes")}
+                            </span>
+                            <span
+                                onClick={() => toast.dismiss(tost.id)}
+                                className={"pretty_outline"}
+                            >
+                                {t("no")}
+                            </span>
+                        </div>
+                    ),
+                    {
+                        duration: Infinity
+                    }
+                );
+            } else void performSave(format);
+        },
+        [manager, performSave, t]
     );
 
     // keybinds
@@ -127,7 +157,7 @@ export function MenuBar({
                     }
                     case "s": {
                         e.preventDefault();
-                        void saveWithToasts("sf2");
+                        void saveWithToasts("auto");
                         break;
                     }
                     default: {
@@ -178,6 +208,12 @@ export function MenuBar({
                 </MenuBarIcon>
                 <MenuBarIcon click={closeTab} text={t(fLoc + "close")}>
                     <CloseFileIcon />
+                </MenuBarIcon>
+                <MenuBarIcon
+                    click={() => void saveWithToasts("auto")}
+                    text={t(fLoc + "save")}
+                >
+                    <SaveFileIcon />
                 </MenuBarIcon>
                 <MenuBarIcon
                     click={() => void saveWithToasts("sf2")}
@@ -243,9 +279,7 @@ export function MenuBar({
                     <LinkIcon />
                 </MenuBarIcon>
             </MenuBarDropdown>
-            {showMidiPlayer && (
-                <MIDIPlayer audioEngine={audioEngine}></MIDIPlayer>
-            )}
+            {showMidiPlayer && <MIDIPlayer></MIDIPlayer>}
             <a
                 className={"menu_bar_button"}
                 href={"https://spessasus.github.io/SpessaSynth"}
@@ -253,7 +287,7 @@ export function MenuBar({
             >
                 {"SpessaSynth"}
             </a>
-            {isChrome && (
+            {IS_CHROME && !IS_ELECTRON && (
                 <MenuBarDropdown main={t("firefox")}></MenuBarDropdown>
             )}
             <div style={{ flex: 1 }}></div>
@@ -276,10 +310,7 @@ export function MenuBar({
             <div className={"menu_bar_button"} onClick={toggleKeyboard}>
                 {t("keyboard")}
             </div>
-            <VoiceDisplay
-                analyser={audioEngine.analyser}
-                processor={audioEngine.processor}
-            ></VoiceDisplay>
+            <VoiceDisplay />
             <div
                 className={"menu_bar_button settings_button"}
                 onClick={toggleSettings}
