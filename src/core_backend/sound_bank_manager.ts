@@ -11,6 +11,7 @@ import {
 } from "spessasynth_core";
 import { type HistoryActionGroup, HistoryManager } from "./history.ts";
 import { encodeVorbis } from "./encode_vorbis.ts";
+import { encodeFlac } from "./encode_flac.ts";
 import {
     reorderInstrumentZones,
     ZONE_SORTING_FUNCTION
@@ -20,7 +21,7 @@ import { SOFTWARE_NAME } from "../utils/software_name.ts";
 
 export type BankEditView = "info" | BasicInstrument | BasicSample | BasicPreset;
 
-export type SaveFormat = "auto" | "sf2" | "dls" | "sf3" | "sf4";
+export type SaveFormat = "auto" | "sf2" | "dls" | "sf3" | "sf3-flac" | "sf4";
 
 const dummy = BasicSoundBank.getSampleSoundBankFile();
 
@@ -210,6 +211,21 @@ export default class SoundBankManager extends BasicSoundBank {
                     software: SOFTWARE_NAME,
                     progressFunction
                 });
+                break;
+            }
+            
+            case "sf3-flac": {
+                this.writeType = "sf3-flac";
+                await this.setSampleFormat({
+                    format: "compressed",
+                    compressionFunction: encodeFlac,
+                    progressFunction
+                });
+                binary = this.writeSF2({
+                    software: SOFTWARE_NAME,
+                    progressFunction
+                });
+                break;
             }
         }
         // Ensure SF3

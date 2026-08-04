@@ -1,0 +1,179 @@
+diff --git a/src/encoder.ts b/src/encoder.ts
+--- a/src/encoder.ts
++++ b/src/encoder.ts
+@@ -1,5 +1,5 @@
+ 
+-import { Flac, DestroyedEvent, CompressionLevel, encoder_write_callback_fn, metadata_callback_fn, StreamMetadata , FLAC__StreamEncoderState, CodingOptions } from '../index.d';
++import type { Flac, DestroyedEvent, CompressionLevel, encoder_write_callback_fn, metadata_callback_fn, StreamMetadata , FLAC__StreamEncoderState, CodingOptions } from '../index.d';
+ import { mergeBuffers , getLength } from './utils/data-utils';
+ import { BeforeReadyHandler } from './before-ready-handler';
+ 
+@@ -33,6 +33,12 @@ export class Encoder {
+ 
+ 	private _beforeReadyHandler?: BeforeReadyHandler<Encoder, ChacheableEncoderCalls>;
+ 
++	/**
++	 * Fix for SpessaSynth, which uses erasableSyntaxOnly
++	 */
++	private Flac: Flac;
++	private _options: EncoderOptions;
++
+ 	/**
+ 	 * cache for the encoded data
+ 	 */
+@@ -66,7 +72,9 @@ export class Encoder {
+ 		return this._beforeReadyHandler?.isWaitOnReady || false;
+ 	}
+ 
+-	constructor(private Flac: Flac, private _options: EncoderOptions){
++	constructor(Flac: Flac, _options: EncoderOptions){
++		this.Flac = Flac;
++		this._options = _options;
+ 		this._id = Flac.create_libflac_encoder(_options.sampleRate, _options.channels, _options.bitsPerSample, _options.compression, _options.totalSamples, _options.verify);
+ 		this._onDestroyed = (evt: DestroyedEvent) => {
+ 			if(evt.target.id === this._id){
+diff --git a/src/before-ready-handler.ts b/src/before-ready-handler.ts
+--- a/src/before-ready-handler.ts
++++ b/src/before-ready-handler.ts
+@@ -1,5 +1,4 @@
+-
+-import { Flac, ReadyEvent } from '../index.d';
++import type { Flac, ReadyEvent } from "../index.d";
+ 
+ /**
+  * Helper class for encoder / decoder:
+@@ -8,63 +7,84 @@ import { Flac, ReadyEvent } from '../index.d';
+  * and then applies them, when Flac becomes ready.
+  */
+ export class BeforeReadyHandler<Target, ChacheableCalls> {
++    private _enabled: boolean = false;
+ 
+-	private _enabled: boolean = false;
+-
+-	private _isWaitOnReady: boolean = false;
+-	private _onReadyHandler?: (evt: ReadyEvent) => void;
+-	private _beforeReadyCache?: {func: ChacheableCalls, args: any[]}[];
++    private _isWaitOnReady: boolean = false;
++    private _onReadyHandler?: (evt: ReadyEvent) => void;
++    private _beforeReadyCache?: { func: ChacheableCalls; args: any[] }[];
+ 
+-	public get isWaitOnReady(): boolean {
+-		return this._isWaitOnReady;
+-	}
++	/**
++	 * Fix for SpessaSynth, which uses erasableSyntaxOnly
++	 */
++	private _target: Target;
++	private Flac: Flac;
+ 
+-	public get enabled(): boolean {
+-		return this._enabled;
+-	}
++    public get isWaitOnReady(): boolean {
++        return this._isWaitOnReady;
++    }
+ 
+-	public set enabled(val: boolean) {
+-		if(!val && this._enabled){
+-			this._reset();
+-		}
+-		this._enabled = this.enabled;
+-	}
++    public get enabled(): boolean {
++        return this._enabled;
++    }
+ 
+-	public constructor(private _target: Target, enabled: boolean, private Flac: Flac){
+-		this._enabled = enabled;
+-	}
++    public set enabled(val: boolean) {
++        if (!val && this._enabled) {
++            this._reset();
++        }
++        this._enabled = this.enabled;
++    }
+ 
+-	public handleBeforeReady(funcName: ChacheableCalls, args: ArrayLike<any>): boolean {
+-		if(!this.Flac.isReady() && this.enabled){
++    public constructor(
++        _target: Target,
++        enabled: boolean,
++        Flac: Flac
++    ) {
++        this._target = _target;
++        this._enabled = enabled;
++        this.Flac = Flac;
++    }
+ 
+-			if(!this._isWaitOnReady){
+-				this._beforeReadyCache = this._beforeReadyCache || [];
+-				this._onReadyHandler = (_evt: ReadyEvent): void => {
+-					if(this._beforeReadyCache){
+-						this._beforeReadyCache.forEach(entry => (this._target as any)[entry.func].apply(this._target, entry.args));
+-					}
+-					this._reset();
+-				};
+-				this.Flac.on('ready', this._onReadyHandler);
+-				this._isWaitOnReady = true;
+-			}
++    public handleBeforeReady(
++        funcName: ChacheableCalls,
++        args: ArrayLike<any>
++    ): boolean {
++        if (!this.Flac.isReady() && this.enabled) {
++            if (!this._isWaitOnReady) {
++                this._beforeReadyCache = this._beforeReadyCache || [];
++                this._onReadyHandler = (_evt: ReadyEvent): void => {
++                    if (this._beforeReadyCache) {
++                        this._beforeReadyCache.forEach((entry) =>
++                            (this._target as any)[entry.func].apply(
++                                this._target,
++                                entry.args
++                            )
++                        );
++                    }
++                    this._reset();
++                };
++                this.Flac.on("ready", this._onReadyHandler);
++                this._isWaitOnReady = true;
++            }
+ 
+-			if(this._beforeReadyCache){
+-				this._beforeReadyCache.push({func: funcName, args: Array.from(args)});
+-				return true;
+-			}
+-		}
+-		return false;
+-	}
++            if (this._beforeReadyCache) {
++                this._beforeReadyCache.push({
++                    func: funcName,
++                    args: Array.from(args)
++                });
++                return true;
++            }
++        }
++        return false;
++    }
+ 
+-	private _reset(): void {
+-		if(this._beforeReadyCache){
+-			this._beforeReadyCache = void(0);
+-		}
+-		if(this._onReadyHandler){
+-			this.Flac.off('ready', this._onReadyHandler);
+-			this._onReadyHandler = void(0);
+-		}
+-		this._isWaitOnReady = false;
+-	}
++    private _reset(): void {
++        if (this._beforeReadyCache) {
++            this._beforeReadyCache = void 0;
++        }
++        if (this._onReadyHandler) {
++            this.Flac.off("ready", this._onReadyHandler);
++            this._onReadyHandler = void 0;
++        }
++        this._isWaitOnReady = false;
++    }
+ }

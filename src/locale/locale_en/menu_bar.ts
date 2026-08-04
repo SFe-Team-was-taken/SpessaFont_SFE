@@ -8,6 +8,7 @@ export const MenuBarLocale = {
         saveSF2: "Save SF2",
         saveDLS: "Save DLS",
         saveSF3: "Save SF3",
+        saveSF3flac: "Save SF3 (FLAC)",
         saveSFE: "Save SFE",
         warnSF2:
             "This sound bank contains compressed samples. " +

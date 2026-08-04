@@ -33,7 +33,8 @@
         "react-dom": "^19.1.0",
         "react-hot-toast": "^2.5.2",
         "react-i18next": "^15.5.2",
-        "spessasynth_core": "latest"
+        "spessasynth_core": "file:../spessasynth_core/spessasynth_core-4.3.16.tgz",
+        "spessasynth_lib": "file:../spessasynth_lib/spessasynth_lib-4.3.12.tgz"
     },
     "devDependencies": {
         "@electron/typescript-definitions": "^9.1.6",

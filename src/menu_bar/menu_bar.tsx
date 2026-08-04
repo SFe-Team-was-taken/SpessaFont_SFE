@@ -238,6 +238,12 @@ export function MenuBar({
                             <SaveFileIcon format={"SF3"} />
                         </MenuBarIcon>
                         <MenuBarIcon
+                            click={() => void saveWithToasts("sf3-flac")}
+                            text={t(fLoc + "saveSF3flac")}
+                        >
+                            <SaveFileIcon format={"SF3"} />
+                        </MenuBarIcon>
+                        <MenuBarIcon
                             click={() => void saveWithToasts("sf4")}
                             text={t(fLoc + "saveSFE")}
                         >
